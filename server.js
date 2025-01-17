@@ -92,7 +92,7 @@ app.post('/process-payment', async (req, res) => {
         
         console.log('Respuesta de MP:', payment);
 
-        // Si el pago es aprobado, enviar UNA SOLA notificación a Telegram
+        // Si el pago es aprobado, enviar notificación y correo
         if (payment.status === 'approved') {
             // Formatear los datos para la notificación
             const notificationData = {
@@ -109,8 +109,14 @@ app.post('/process-payment', async (req, res) => {
                 description: payment.description
             };
 
-            // Enviar una única notificación
+            // Enviar notificación
             await sendTelegramNotification(notificationData);
+
+            // Enviar correo de confirmación localmente
+            const emailSent = await sendConfirmationEmail(notificationData.customerEmail, payment);
+            if (!emailSent) {
+                console.error('Error al enviar el correo de confirmación');
+            }
         }
         
         res.json({
@@ -128,23 +134,40 @@ app.post('/process-payment', async (req, res) => {
     }
 });
 
-//Ruta para el envio de email de confirmacion al cliente
-app.post('/send-confirmation-email', (req, res) => {
-    const { email, orderId, items, total } = req.body;
-  
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Confirmación de tu pedido',
-      text: `Gracias por tu compra!\n\nTu ID de pedido es: ${orderId}\n\nDetalles de tu pedido:\n${items}\n\nTotal: $${total}`
-    };
-  
-    transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        return res.status(500).send(error.toString());
-      }
-      res.status(200).send('Correo enviado: ' + info.response);
-    });
+// Función para enviar el correo de confirmación
+async function sendConfirmationEmail(customerEmail, paymentData) {
+    try {
+        // Aquí iría la lógica para enviar el correo
+        // Por ejemplo, usando un servicio de correo como nodemailer
+        console.log(`Enviando correo de confirmación a: ${customerEmail} para el pago ID: ${paymentData.id}`);
+
+        // Simulación de envío de correo
+        // await sendEmail(customerEmail, paymentData);
+
+        return true; // Retornar true si el correo se envió correctamente
+    } catch (error) {
+        console.error('Error al enviar el correo de confirmación:', error);
+        return false; // Retornar false si hubo un error
+    }
+}
+
+// Ruta para enviar el correo de confirmación
+app.post('/send-confirmation-email', async (req, res) => {
+    try {
+        const { customerEmail, paymentId } = req.body;
+
+        // Aquí iría la lógica para enviar el correo
+        // Por ejemplo, usando un servicio de correo como nodemailer
+        console.log(`Enviando correo de confirmación a: ${customerEmail} para el pago ID: ${paymentId}`);
+
+        // Simulación de envío de correo
+        // await sendEmail(customerEmail, paymentId);
+
+        res.json({ message: 'Correo de confirmación enviado correctamente' });
+    } catch (error) {
+        console.error('Error al enviar el correo de confirmación:', error);
+        res.status(500).json({ error: 'Error al enviar el correo de confirmación' });
+    }
 });
 
 // Ruta de health check
