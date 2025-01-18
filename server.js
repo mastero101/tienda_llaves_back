@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import TelegramBot from 'node-telegram-bot-api';
+import sgMail from '@sendgrid/mail';
 
 dotenv.config();
 
@@ -29,6 +30,9 @@ bot.on('message', (msg) => {
     console.log('Mensaje recibido:', msg);
     console.log('Chat ID:', msg.chat.id);
 });
+
+// Configurar SendGrid con la API Key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Función para enviar notificación por Telegram
 async function sendTelegramNotification(paymentData) {
@@ -137,13 +141,17 @@ app.post('/process-payment', async (req, res) => {
 // Función para enviar el correo de confirmación
 async function sendConfirmationEmail(customerEmail, paymentData) {
     try {
-        // Aquí iría la lógica para enviar el correo
-        // Por ejemplo, usando un servicio de correo como nodemailer
-        console.log(`Enviando correo de confirmación a: ${customerEmail} para el pago ID: ${paymentData.id}`);
+        const msg = {
+            to: customerEmail, // Correo del cliente
+            from: 'castro.alejandro17@gmail.com', // Tu correo verificado en SendGrid
+            subject: 'Confirmación de Pago',
+            text: `Gracias por tu pago!\n\nDetalles del pago:\nID de Pago: ${paymentData.id}\nMonto: $${paymentData.transaction_amount}\nEstado: ${paymentData.status}\nDescripción: ${paymentData.description}`,
+            html: `<strong>Gracias por tu pago!</strong><br><br>Detalles del pago:<br>ID de Pago: ${paymentData.id}<br>Monto: $${paymentData.transaction_amount}<br>Estado: ${paymentData.status}<br>Descripción: ${paymentData.description}`,
+        };
 
-        // Simulación de envío de correo
-        // await sendEmail(customerEmail, paymentData);
-
+        // Enviar el correo
+        await sgMail.send(msg);
+        console.log(`Correo de confirmación enviado a: ${customerEmail}`);
         return true; // Retornar true si el correo se envió correctamente
     } catch (error) {
         console.error('Error al enviar el correo de confirmación:', error);
