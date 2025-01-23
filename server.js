@@ -34,6 +34,12 @@ bot.on('message', (msg) => {
 // Configurar SendGrid con la API Key
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+// Función para formatear la fecha
+function formatDate(date) {
+    const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+    return new Date(date).toLocaleDateString('es-ES', options);
+}
+
 // Función para enviar notificación por Telegram
 async function sendTelegramNotification(paymentData) {
     try {
@@ -44,19 +50,41 @@ async function sendTelegramNotification(paymentData) {
 
         console.log('Datos recibidos en notificación:', paymentData);
 
-        const message = 
-            `🎉 ¡Nueva Venta Realizada!\n\n` +
-            `💰 Monto: $${paymentData.amount}\n` +
-            `💵 Monto Neto: $${paymentData.netAmount || 'N/A'}\n` +
-            `🔢 ID de Pago: ${paymentData.paymentId}\n` +
-            `✅ Estado: ${paymentData.status}\n` +
-            `💳 Método: ${paymentData.paymentMethod} (${paymentData.cardType || 'N/A'})\n` +
-            `📧 Cliente: ${paymentData.customerEmail || 'No especificado'}\n` +
-            `📝 Descripción: ${paymentData.description || 'N/A'}\n` +
-            `📅 Fecha: ${new Date(paymentData.date).toLocaleString()}\n\n` +
-            `🔍 Detalles adicionales:\n` +
-            `- Cuotas: ${paymentData.installments}\n` +
-            `- Últimos 4 dígitos: ${paymentData.cardLastDigits}`;
+        // Formatear los artículos como una lista
+        const itemsList = paymentData.items.map(item => 
+            `${item.quantity}x ${item.product.name} - $${item.product.price}`
+        ).join('\n');
+
+        let message;
+        if (paymentData.paymentMethod === 'transfer') {
+            // Mensaje para transferencias bancarias
+            message = 
+                `🎉 ¡Nueva Transferencia Bancaria!\n\n` +
+                `💰 Monto: $${paymentData.amount}\n` +
+                `🔢 ID de Transferencia: ${paymentData.paymentId}\n` +
+                `📧 Cliente: ${paymentData.customerEmail || 'No especificado'}\n` +
+                `📝 Descripción: ${paymentData.description || 'N/A'}\n` +
+                `📅 Fecha: ${formatDate(paymentData.date)}\n\n` +
+                `🛒 Artículos Comprados:\n${itemsList}\n\n` +
+                `🔍 Detalles adicionales:\n` +
+                `- Método: ${paymentData.paymentMethod}`;
+        } else {
+            // Mensaje para pagos con tarjeta
+            message = 
+                `🎉 ¡Nueva Venta Realizada!\n\n` +
+                `💰 Monto: $${paymentData.amount}\n` +
+                `💵 Monto Neto: $${paymentData.netAmount || 'N/A'}\n` +
+                `🔢 ID de Pago: ${paymentData.paymentId}\n` +
+                `✅ Estado: ${paymentData.status}\n` +
+                `💳 Método: ${paymentData.paymentMethod} (${paymentData.cardType || 'N/A'})\n` +
+                `📧 Cliente: ${paymentData.customerEmail || 'No especificado'}\n` +
+                `📝 Descripción: ${paymentData.description || 'N/A'}\n` +
+                `📅 Fecha: ${formatDate(paymentData.date)}\n\n` +
+                `🛒 Artículos Comprados:\n${itemsList}\n\n` +
+                `🔍 Detalles adicionales:\n` +
+                `- Cuotas: ${paymentData.installments}\n` +
+                `- Últimos 4 dígitos: ${paymentData.cardLastDigits}`;
+        }
 
         if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
             throw new Error('Faltan credenciales de Telegram');
@@ -110,7 +138,8 @@ app.post('/process-payment', async (req, res) => {
                 cardType: payment.payment_type_id,
                 installments: payment.installments,
                 cardLastDigits: payment.card?.last_four_digits || 'N/A',
-                description: payment.description
+                description: payment.description,
+                items: req.body.items || [] // Asegúrate de incluir los items aquí
             };
 
             // Enviar notificación
@@ -141,21 +170,108 @@ app.post('/process-payment', async (req, res) => {
 // Función para enviar el correo de confirmación
 async function sendConfirmationEmail(customerEmail, paymentData) {
     try {
+        // Plantilla HTML mejorada
+        const htmlContent = `
+            <!DOCTYPE html>
+            <html lang="es">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Confirmación de Pago</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        background-color: #f4f4f4;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 20px auto;
+                        background-color: #ffffff;
+                        padding: 20px;
+                        border-radius: 8px;
+                        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                    }
+                    .header {
+                        text-align: center;
+                        padding-bottom: 20px;
+                        border-bottom: 1px solid #ddd;
+                    }
+                    .header img {
+                        max-width: 150px;
+                    }
+                    .content {
+                        margin-top: 20px;
+                    }
+                    .content h1 {
+                        color: #333;
+                        font-size: 24px;
+                    }
+                    .content p {
+                        color: #555;
+                        font-size: 16px;
+                        line-height: 1.6;
+                    }
+                    .footer {
+                        margin-top: 20px;
+                        text-align: center;
+                        font-size: 14px;
+                        color: #888;
+                    }
+                    .footer a {
+                        color: #007BFF;
+                        text-decoration: none;
+                    }
+                    .footer a:hover {
+                        text-decoration: underline;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <img src="https://ejemplo.com/logo.png" alt="Logo de la empresa">
+                        <h1>¡Gracias por tu compra!</h1>
+                    </div>
+                    <div class="content">
+                        <p>Hola ${paymentData.payer?.first_name || 'Cliente'},</p>
+                        <p>Tu pago ha sido procesado exitosamente. Aquí están los detalles de tu transacción:</p>
+                        <ul>
+                            <li><strong>ID de Pago:</strong> ${paymentData.id}</li>
+                            <li><strong>Monto:</strong> $${paymentData.transaction_amount}</li>
+                            <li><strong>Estado:</strong> ${paymentData.status}</li>
+                            <li><strong>Método de Pago:</strong> ${paymentData.payment_method_id} (${paymentData.payment_type_id || 'N/A'})</li>
+                            <li><strong>Cuotas:</strong> ${paymentData.installments}</li>
+                            <li><strong>Descripción:</strong> ${paymentData.description}</li>
+                        </ul>
+                        <p>Si tienes alguna pregunta o necesitas asistencia, no dudes en contactarnos en <a href="mailto:castro.alejandro17@gmail.com">castro.alejandro17@gmail.com</a> o 529811402316.</p>
+                    </div>
+                    <div class="footer">
+                        <p>Gracias por confiar en nosotros.</p>
+                        <p><a href="https://tienda-llaves-front.vercel.app/">Visita nuestra tienda</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+
+        // Configurar el mensaje
         const msg = {
-            to: customerEmail, // Correo del cliente
-            from: 'castro.alejandro17@gmail.com', // Tu correo verificado en SendGrid
+            to: customerEmail,
+            from: 'castro.alejandro17@gmail.com', // Cambia esto por tu correo verificado
             subject: 'Confirmación de Pago',
             text: `Gracias por tu pago!\n\nDetalles del pago:\nID de Pago: ${paymentData.id}\nMonto: $${paymentData.transaction_amount}\nEstado: ${paymentData.status}\nDescripción: ${paymentData.description}`,
-            html: `<strong>Gracias por tu pago!</strong><br><br>Detalles del pago:<br>ID de Pago: ${paymentData.id}<br>Monto: $${paymentData.transaction_amount}<br>Estado: ${paymentData.status}<br>Descripción: ${paymentData.description}`,
+            html: htmlContent,
         };
 
         // Enviar el correo
         await sgMail.send(msg);
         console.log(`Correo de confirmación enviado a: ${customerEmail}`);
-        return true; // Retornar true si el correo se envió correctamente
+        return true;
     } catch (error) {
         console.error('Error al enviar el correo de confirmación:', error);
-        return false; // Retornar false si hubo un error
+        return false;
     }
 }
 
@@ -177,6 +293,107 @@ app.post('/send-confirmation-email', async (req, res) => {
         res.status(500).json({ error: 'Error al enviar el correo de confirmación' });
     }
 });
+
+// Función para enviar correo de confirmación de transferencia bancaria
+async function sendBankTransferConfirmationEmail(customerEmail, transferDetails) {
+    try {
+      // Formatear los artículos como una lista
+      const itemsList = transferDetails.items.map(item => 
+        `${item.quantity}x ${item.product.name} - $${item.product.price}`
+      ).join('<br>');
+  
+      const msg = {
+        to: customerEmail,
+        from: 'castro.alejandro17@gmail.com', // Cambia esto por tu correo
+        subject: 'Confirmación de Transferencia Bancaria',
+        html: `
+          <h1>Confirmación de Transferencia Bancaria</h1>
+          <p>Gracias por tu compra. Por favor, realiza la transferencia con los siguientes detalles:</p>
+          <h2>Datos Bancarios</h2>
+          <p>Banco: ${transferDetails.bankInfo.name}</p>
+          <p>Beneficiario: ${transferDetails.bankInfo.accountHolder}</p>
+          <p>CLABE: ${transferDetails.bankInfo.clabe}</p>
+          <p>Monto a Transferir: $${transferDetails.amount}</p>
+          <p>ID de Transferencia: ${transferDetails.paymentId}</p>
+          <h2>Artículos Comprados</h2>
+          <p>${itemsList}</p>
+          <p>Una vez realizada la transferencia, nuestro equipo procesará tu pedido.</p>
+        `
+      };
+  
+      await sgMail.send(msg);
+      console.log(`Correo de confirmación de transferencia enviado a: ${customerEmail}`);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar el correo de confirmación de transferencia:', error);
+      return false;
+    }
+  }
+  
+  app.post('/bank-transfer-confirmation', async (req, res) => {
+    try {
+      console.log('Datos recibidos en el backend:', req.body); // Agregar log para depuración
+  
+      const { customerEmail, transferDetails } = req.body;
+  
+      // Extraer items de transferDetails
+      const items = transferDetails.items;
+  
+      // Verificar que los datos estén presentes
+      if (!customerEmail || !transferDetails || !items) {
+        throw new Error('Datos incompletos en la solicitud');
+      }
+  
+      // Generar un ID de transferencia único
+      const paymentId = `TRANSFER-${Date.now()}`;
+  
+      // Enviar correo de confirmación
+      const emailSent = await sendBankTransferConfirmationEmail(customerEmail, {
+        ...transferDetails,
+        paymentId: paymentId, // Incluir el ID de la transferencia
+        items: items // Incluir los artículos del carrito
+      });
+  
+      if (emailSent) {
+        // Formatear los datos para la notificación de Telegram
+        const notificationData = {
+          paymentId: paymentId, // Usar el mismo ID generado anteriormente
+          amount: transferDetails.amount,
+          customerEmail: customerEmail,
+          status: 'pending', // Estado de la transferencia
+          paymentMethod: 'transfer', // Método de pago
+          description: 'Transferencia bancaria',
+          date: new Date(), // Pasar la fecha como un objeto Date
+          items: items // Incluir los artículos del carrito
+        };
+  
+        // Enviar notificación a Telegram
+        const telegramSent = await sendTelegramNotification(notificationData);
+  
+        if (!telegramSent) {
+          console.error('Error al enviar notificación de Telegram');
+        }
+  
+        res.status(200).json({ 
+          message: 'Correo de confirmación de transferencia enviado',
+          status: 'success',
+          paymentId: paymentId // Devolver el ID de transferencia en la respuesta
+        });
+      } else {
+        res.status(500).json({ 
+          message: 'Error al enviar correo de confirmación',
+          status: 'error'
+        });
+      }
+    } catch (error) {
+      console.error('Error en ruta de confirmación de transferencia:', error);
+      res.status(500).json({ 
+        message: 'Error interno del servidor',
+        status: 'error',
+        details: error.message
+      });
+    }
+  });
 
 // Ruta de health check
 app.get('/', (req, res) => {
