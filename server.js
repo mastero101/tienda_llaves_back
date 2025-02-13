@@ -5,6 +5,9 @@ import dotenv from 'dotenv';
 import TelegramBot from 'node-telegram-bot-api';
 import sgMail from '@sendgrid/mail';
 
+import { saveCardPayment, saveBankTransfer } from './db.js';
+import { initializeDatabase } from './db.js';
+
 dotenv.config();
 
 const app = express();
@@ -39,6 +42,11 @@ function formatDate(date) {
     const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
     return new Date(date).toLocaleDateString('es-ES', options);
 }
+
+(async () => {
+    await initializeDatabase();
+    console.log('Servidor corriendo en puerto 9201');
+})();
 
 // Función para enviar notificación por Telegram
 async function sendTelegramNotification(paymentData) {
@@ -104,6 +112,10 @@ app.post('/process-payment', async (req, res) => {
     try {
         console.log('Datos recibidos:', req.body);
 
+        // Se incluyen las mejoras solicitadas:
+        // 1. device_id (viene del frontend o se puede generar)
+        // 2. notification_url (se configura desde una variable de entorno)
+        // 3. external_reference (puede venir del frontend o generarse dinámicamente)
         const paymentData = {
             transaction_amount: parseFloat(req.body.transaction_amount),
             token: req.body.token,
@@ -111,13 +123,18 @@ app.post('/process-payment', async (req, res) => {
             installments: parseInt(req.body.installments) || 1,
             payment_method_id: req.body.payment_method_id,
             payer: {
-                email: req.body.payer?.email,
-                identification: {
-                    type: req.body.payer?.identification?.type || "DNI",
-                    number: req.body.payer?.identification?.number
-                }
+              email: req.body.payer?.email,
+              identification: {
+                type: req.body.payer?.identification?.type || "DNI",
+                number: req.body.payer?.identification?.number
+              }
+            },
+            notification_url: process.env.MERCADO_PAGO_NOTIFICATION_URL || 'https://tienda-llaves-back.vercel.app/webhook',
+            external_reference: req.body.external_reference || `ORDER-${Date.now()}`,
+            metadata: {
+              device_id: req.body.device_id || 'NO_DEVICE_ID'
             }
-        };
+          };          
 
         const paymentClient = new Payment(client);
         const payment = await paymentClient.create({ body: paymentData });
@@ -142,6 +159,9 @@ app.post('/process-payment', async (req, res) => {
                 items: req.body.items || [] // Asegúrate de incluir los items aquí
             };
 
+            // Guardar en la base de datos usando la función específica para pagos con tarjeta
+            await saveCardPayment(notificationData);
+
             // Enviar notificación
             await sendTelegramNotification(notificationData);
 
@@ -165,6 +185,13 @@ app.post('/process-payment', async (req, res) => {
             details: error.response?.data || error.message
         });
     }
+});
+
+// Endpoint para recibir notificaciones Webhook de Mercado Pago
+app.post('/webhook', (req, res) => {
+    console.log('Notificación Webhook recibida:', req.body);
+    // Aquí puedes procesar la notificación (por ejemplo, actualizar el estado del pago en tu base de datos)
+    res.sendStatus(200);
 });
 
 // Función para enviar el correo de confirmación
@@ -280,12 +307,7 @@ app.post('/send-confirmation-email', async (req, res) => {
     try {
         const { customerEmail, paymentId } = req.body;
 
-        // Aquí iría la lógica para enviar el correo
-        // Por ejemplo, usando un servicio de correo como nodemailer
         console.log(`Enviando correo de confirmación a: ${customerEmail} para el pago ID: ${paymentId}`);
-
-        // Simulación de envío de correo
-        // await sendEmail(customerEmail, paymentId);
 
         res.json({ message: 'Correo de confirmación enviado correctamente' });
     } catch (error) {
@@ -297,7 +319,6 @@ app.post('/send-confirmation-email', async (req, res) => {
 // Función para enviar correo de confirmación de transferencia bancaria
 async function sendBankTransferConfirmationEmail(customerEmail, transferDetails) {
     try {
-      // Formatear los artículos como una lista
       const itemsList = transferDetails.items.map(item => 
         `${item.quantity}x ${item.product.name} - $${item.product.price}`
       ).join('<br>');
@@ -328,72 +349,62 @@ async function sendBankTransferConfirmationEmail(customerEmail, transferDetails)
       console.error('Error al enviar el correo de confirmación de transferencia:', error);
       return false;
     }
-  }
+}
   
-  app.post('/bank-transfer-confirmation', async (req, res) => {
+app.post('/bank-transfer-confirmation', async (req, res) => {
     try {
-      console.log('Datos recibidos en el backend:', req.body); // Agregar log para depuración
-  
-      const { customerEmail, transferDetails } = req.body;
-  
-      // Extraer items de transferDetails
-      const items = transferDetails.items;
-  
-      // Verificar que los datos estén presentes
-      if (!customerEmail || !transferDetails || !items) {
-        throw new Error('Datos incompletos en la solicitud');
-      }
-  
-      // Generar un ID de transferencia único
-      const paymentId = `TRANSFER-${Date.now()}`;
-  
-      // Enviar correo de confirmación
-      const emailSent = await sendBankTransferConfirmationEmail(customerEmail, {
-        ...transferDetails,
-        paymentId: paymentId, // Incluir el ID de la transferencia
-        items: items // Incluir los artículos del carrito
-      });
-  
-      if (emailSent) {
-        // Formatear los datos para la notificación de Telegram
-        const notificationData = {
-          paymentId: paymentId, // Usar el mismo ID generado anteriormente
-          amount: transferDetails.amount,
-          customerEmail: customerEmail,
-          status: 'pending', // Estado de la transferencia
-          paymentMethod: 'transfer', // Método de pago
-          description: 'Transferencia bancaria',
-          date: new Date(), // Pasar la fecha como un objeto Date
-          items: items // Incluir los artículos del carrito
+        const { customerEmail, transferDetails } = req.body;
+        const paymentId = `TRANSFER-${Date.now()}`;
+
+        const purchaseData = {
+            paymentId,
+            amount: transferDetails.amount,
+            customerEmail,
+            date: new Date(),
+            items: transferDetails.items
         };
-  
-        // Enviar notificación a Telegram
-        const telegramSent = await sendTelegramNotification(notificationData);
-  
-        if (!telegramSent) {
-          console.error('Error al enviar notificación de Telegram');
+
+        // Enviar notificaciones
+        const emailSent = await sendBankTransferConfirmationEmail(customerEmail, {
+            ...transferDetails,
+            paymentId: paymentId
+        });
+
+        if (emailSent) {
+            const notificationData = {
+                paymentId,
+                amount: transferDetails.amount,
+                customerEmail,
+                status: 'pending',
+                paymentMethod: 'transfer',
+                description: 'Transferencia bancaria',
+                date: new Date(),
+                items: transferDetails.items
+            };
+
+            await sendTelegramNotification(notificationData);
+            // Guardar en la base de datos usando la función específica para transferencias
+            await saveBankTransfer(notificationData);
+            
+            res.status(200).json({
+                message: 'Procesamiento exitoso',
+                status: 'success',
+                paymentId
+            });
+        } else {
+            res.status(500).json({
+                message: 'Error al enviar confirmación',
+                status: 'error'
+            });
         }
-  
-        res.status(200).json({ 
-          message: 'Correo de confirmación de transferencia enviado',
-          status: 'success',
-          paymentId: paymentId // Devolver el ID de transferencia en la respuesta
-        });
-      } else {
-        res.status(500).json({ 
-          message: 'Error al enviar correo de confirmación',
-          status: 'error'
-        });
-      }
     } catch (error) {
-      console.error('Error en ruta de confirmación de transferencia:', error);
-      res.status(500).json({ 
-        message: 'Error interno del servidor',
-        status: 'error',
-        details: error.message
-      });
+        console.error('Error:', error);
+        res.status(500).json({
+            message: 'Error interno del servidor',
+            details: error.message
+        });
     }
-  });
+});
 
 // Ruta de health check
 app.get('/', (req, res) => {

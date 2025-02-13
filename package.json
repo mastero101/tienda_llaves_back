@@ -14,6 +14,9 @@
     "express": "^4.21.2",
     "mercadopago": "^2.2.0",
     "mercadopago-api": "file:",
-    "node-telegram-bot-api": "^0.66.0"
+    "node-telegram-bot-api": "^0.66.0",
+    "pg": "^8.13.2",
+    "sequelize": "^6.37.5",
+    "sequelize-cli": "^6.6.2"
   }
 }
