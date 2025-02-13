@@ -6,6 +6,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import sgMail from '@sendgrid/mail';
 
 import { saveCardPayment, saveBankTransfer } from './db.js';
+import { Purchase, PurchaseItem } from './db.js';
 import { initializeDatabase } from './db.js';
 
 dotenv.config();
@@ -403,6 +404,23 @@ app.post('/bank-transfer-confirmation', async (req, res) => {
             message: 'Error interno del servidor',
             details: error.message
         });
+    }
+});
+
+app.get('/sales', async (req, res) => {
+    try {
+        const sales = await Purchase.findAll({
+            include: [{
+                model: PurchaseItem,
+                as: 'PurchaseItems' // Asegúrate de que este alias coincida si usas `as` en la relación
+            }],
+            order: [['purchase_date', 'DESC']]
+        });
+
+        res.status(200).json(sales);
+    } catch (error) {
+        console.error('Error al obtener las ventas:', error);
+        res.status(500).json({ error: 'Error al obtener las ventas' });
     }
 });
 
